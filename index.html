@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Space Scavenger Prototype</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#03050b;color:#dffcff;font-family:Arial,sans-serif;touch-action:none}
+canvas{display:block;width:100%;height:100%;background:#03050b}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,#111d31,#03050b 70%);z-index:5}
+.card{text-align:center;padding:28px 24px;border:1px solid #3ef6ff;border-radius:18px;background:#07101dcc;box-shadow:0 0 30px #0ff4}
+h1{margin:0 0 8px;font-size:34px;letter-spacing:3px}
+p{opacity:.75}
+button{margin-top:20px;padding:16px 28px;border:1px solid #4ff;border-radius:12px;background:#0b2630;color:#dffcff;font-size:18px;font-weight:bold}
+#hud{position:fixed;left:14px;top:12px;z-index:2;font-size:14px;line-height:1.5;text-shadow:0 0 8px #0ff}
+#hint{position:fixed;right:14px;top:12px;z-index:2;text-align:right;font-size:12px;opacity:.7}
+#controls{position:fixed;inset:0;pointer-events:none;z-index:3}
+.pad{position:absolute;left:18px;bottom:20px;width:140px;height:140px;pointer-events:auto}
+.k{position:absolute;width:48px;height:48px;border:1px solid #6ff8;border-radius:14px;background:#102431cc;color:#dff;font-size:20px}
+.up{left:46px;top:0}.left{left:0;top:46px}.right{right:0;top:46px}.down{left:46px;bottom:0}
+.arm{position:absolute;bottom:28px;width:76px;height:76px;border-radius:50%;border:1px solid #6ff8;background:#102431cc;color:#dff;font-weight:bold;pointer-events:auto}
+#l{right:112px}#r{right:20px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="start"><div class="card"><h1>SPACE SCAVENGER</h1><p>ORBITAL CLEANUP // SHIFT 01</p><button id="startBtn">START SHIFT</button></div></div>
+<div id="hud"></div><div id="hint">PC: WASD + mouse / Mobile: touch controls</div>
+<div id="controls"><div class="pad"><button class="k up" data-key="up">▲</button><button class="k left" data-key="left">◀</button><button class="k right" data-key="right">▶</button><button class="k down" data-key="down">▼</button></div><button class="arm" id="l">L ARM</button><button class="arm" id="r">R ARM</button></div>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d'),start=document.getElementById('start'),hud=document.getElementById('hud');
+let W,H,run=false,credits=0,cargo=0,cap=8,keys={},mouse={x:0,y:0};
+let p={x:0,y:0,s:4}, junk=[];
+function resize(){W=c.width=innerWidth*devicePixelRatio;H=c.height=innerHeight*devicePixelRatio;c.style.width=innerWidth+'px';c.style.height=innerHeight+'px';x.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);W=innerWidth;H=innerHeight}
+addEventListener('resize',resize);resize();
+function spawn(){junk=[];for(let i=0;i<22;i++)junk.push({x:(Math.random()-.5)*W*1.8,y:(Math.random()-.5)*H*1.5,r:8+Math.random()*9,v:Math.floor(Math.random()*5),taken:false})}
+function begin(){run=true;start.style.display='none';p.x=W/2;p.y=H/2;spawn()}
+document.getElementById('startBtn').addEventListener('click',begin);
+document.getElementById('startBtn').addEventListener('touchstart',e=>{e.preventDefault();begin()},{passive:false});
+start.addEventListener('touchstart',e=>{if(e.target===start){begin()}},{passive:false});
+addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+c.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+function bind(el,k){el.addEventListener('touchstart',e=>{e.preventDefault();keys[k]=true},{passive:false});el.addEventListener('touchend',e=>{e.preventDefault();keys[k]=false},{passive:false})}
+document.querySelectorAll('[data-key]').forEach(b=>bind(b,b.dataset.key));
+function arm(){if(!run||cargo>=cap)return;let best=null,bd=70;for(const j of junk){if(j.taken)continue;let d=Math.hypot(j.x-p.x,j.y-p.y);if(d<bd){bd=d;best=j}}if(best){best.taken=true;cargo++;credits+=10+best.v*15}}
+document.getElementById('l').addEventListener('touchstart',e=>{e.preventDefault();arm()},{passive:false});
+document.getElementById('r').addEventListener('touchstart',e=>{e.preventDefault();arm()},{passive:false});
+document.getElementById('l').addEventListener('click',arm);document.getElementById('r').addEventListener('click',arm);
+function loop(){
+requestAnimationFrame(loop);if(!run)return;
+let dx=(keys['d']||keys['arrowright']||keys.right?1:0)-(keys['a']||keys['arrowleft']||keys.left?1:0);
+let dy=(keys['s']||keys['arrowdown']||keys.down?1:0)-(keys['w']||keys['arrowup']||keys.up?1:0);
+let n=Math.hypot(dx,dy)||1;p.x+=dx/n*p.s;p.y+=dy/n*p.s;p.x=Math.max(40,Math.min(W-40,p.x));p.y=Math.max(60,Math.min(H-40,p.y));
+x.clearRect(0,0,W,H);x.fillStyle='#03050b';x.fillRect(0,0,W,H);
+for(let i=0;i<90;i++){x.fillStyle=i%7?'#183044':'#5df';x.globalAlpha=.5;x.fillRect((i*83)%W,(i*47)%H,1.5,1.5)}x.globalAlpha=1;
+for(const j of junk)if(!j.taken){x.strokeStyle='#47f6ff';x.shadowBlur=12;x.shadowColor='#0ff';x.fillStyle=['#777','#b87333','#777','#cfc','#a55'][j.v];x.beginPath();x.arc(p.x+j.x-W/2,p.y+j.y-H/2,j.r,0,Math.PI*2);x.fill();x.stroke()}
+x.shadowBlur=15;x.shadowColor='#0ff';x.fillStyle='#172a3c';x.strokeStyle='#55faff';x.lineWidth=2;x.beginPath();x.roundRect(p.x-22,p.y-30,44,60,10);x.fill();x.stroke();x.fillStyle='#9ff';x.fillRect(p.x-10,p.y-17,20,9);x.shadowBlur=0;
+hud.innerHTML=`CREDITS: ${credits} &nbsp; CARGO: ${cargo}/${cap}`;
+}
+loop();
+</script>
+</body></html>
