@@ -131,7 +131,7 @@ const weapons={
   R:{cool:0,success:false,state:'ready',x:0,y:0,target:null,progress:0}
 };
 const weaponMode='pincer'; // Basic weapon. Grapple can be added as another weapon type later.
-const PINCER_REACH=76;
+const PINCER_REACH=45;
 const PINCER_EXTEND_TIME=.22;
 const PINCER_RETRACT_TIME=.22;
 const PINCER_CLOSE_TIME=.16;
@@ -267,20 +267,26 @@ function drawJunk(){
 }
 function drawCooldownArc(side,floatY){
   const g=weapons[side];
-  if(g.cool<=0)return; // invisible when ready
-  const sideSign=side==='L'?-1:1;
-  const cx=W/2,cy=H/2+floatY;
-  const arcCenter=mech.heading + sideSign*Math.PI*.92;
-  const arcSpan=.78;
-  const radius=30;
+  if(g.cool<=0)return;
+  // Short gauge sits immediately outside its own arm: L = left of left arm, R = right of right arm.
+  const b=sideBasis(side);
+  const sideSign=b.sideSign;
+  const shoulderAngle=mech.heading + sideSign*.62;
+  const gx=b.sx + Math.cos(shoulderAngle)*13;
+  const gy=b.sy + Math.sin(shoulderAngle)*13;
+  const cx=sx(gx), cy=sy(gy)+floatY;
+  const outward=shoulderAngle + sideSign*Math.PI/2;
+  const arcCenter=outward;
+  const arcSpan=.72;
+  const radius=11;
   const total=g.success?1.6:3.2;
   const progress=1-Math.min(1,g.cool/total);
   ctx.save();
-  ctx.translate(cx,cy);ctx.rotate(0);
-  ctx.lineCap='round';ctx.lineWidth=2.2;
-  ctx.strokeStyle=side==='L'?'rgba(255,105,208,.18)':'rgba(190,145,255,.18)';
+  ctx.translate(cx,cy);
+  ctx.lineCap='round';ctx.lineWidth=2;
+  ctx.strokeStyle=side==='L'?'rgba(255,105,208,.20)':'rgba(190,145,255,.20)';
   ctx.beginPath();ctx.arc(0,0,radius,arcCenter-arcSpan/2,arcCenter+arcSpan/2);ctx.stroke();
-  ctx.strokeStyle=side==='L'?'rgba(255,105,208,.9)':'rgba(190,145,255,.9)';
+  ctx.strokeStyle=side==='L'?'rgba(255,105,208,.92)':'rgba(190,145,255,.92)';
   ctx.beginPath();ctx.arc(0,0,radius,arcCenter-arcSpan/2,arcCenter-arcSpan/2+arcSpan*progress);ctx.stroke();
   ctx.restore();
 }
@@ -290,7 +296,7 @@ function drawPincerArm(side,floatY){
   const moving=g.state!=='ready';
   // Slightly animate the resting elbow, but the entire arm axis follows mech.heading.
   const restReach=g.state==='ready'?0:Math.min(1,g.progress);
-  const elbowDist=31 + 9*restReach;
+  const elbowDist=19 + 5*restReach;
   const shoulderAngle=mech.heading + sideSign*.62;
   const foreAngle=mech.heading + sideSign*.34;
   const shoulder={x:mech.x+Math.cos(shoulderAngle)*13,y:mech.y+Math.sin(shoulderAngle)*13};
@@ -315,11 +321,11 @@ function drawPincerArm(side,floatY){
   const open=.42*(1-close);
   ctx.translate(tx,ty);ctx.rotate(clawAngle);
   ctx.strokeStyle='#f3ffff';ctx.lineWidth=2.4;ctx.shadowBlur=8;ctx.shadowColor=c;
-  ctx.beginPath();ctx.moveTo(1,0);ctx.lineTo(12, -7-open*5);ctx.lineTo(18, -4-open*6);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(1,0);ctx.lineTo(12, 7+open*5);ctx.lineTo(18, 4+open*6);ctx.stroke();
-  // claw tips
-  ctx.lineWidth=1.8;ctx.beginPath();ctx.moveTo(18,-4-open*6);ctx.lineTo(15,-1-open*5);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(18,4+open*6);ctx.lineTo(15,1+open*5);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(1,0);ctx.lineTo(7, -4-open*3);ctx.lineTo(11, -2-open*3);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(1,0);ctx.lineTo(7, 4+open*3);ctx.lineTo(11, 2+open*3);ctx.stroke();
+  // short horn-like claw tips
+  ctx.lineWidth=1.8;ctx.beginPath();ctx.moveTo(11,-2-open*3);ctx.lineTo(8,-1-open*2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(11,2+open*3);ctx.lineTo(8,1+open*2);ctx.stroke();
   ctx.restore();
 }
 function drawMech(){
