@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Space Scavenger 0.6</title>
+<title>Space Scavenger 0.7</title>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02040a;color:#dffcff;font-family:Arial,sans-serif;touch-action:none}
@@ -15,14 +15,13 @@ p{opacity:.7}
 button{-webkit-tap-highlight-color:transparent;user-select:none;font:inherit}
 #startBtn{margin-top:20px;padding:16px 28px;border:1px solid #4ff;border-radius:12px;background:#0b2630;color:#dffcff;font-weight:700}
 #startBtn.pressed,#startBtn:active{background:#1de9ff;color:#001014;box-shadow:0 0 25px #1de9ff}
-#hud{position:fixed;z-index:4;top:12px;left:14px;font-size:14px;line-height:1.55;text-shadow:0 0 8px #0ff}
+#hud{position:fixed;z-index:4;top:12px;left:14px;font-size:14px;line-height:1.5;text-shadow:0 0 8px #0ff}
 #hint{position:fixed;z-index:4;top:12px;right:14px;text-align:right;font-size:12px;opacity:.6}
 #controls{position:fixed;z-index:10;inset:0;pointer-events:none}
-.pad{position:absolute;left:18px;bottom:20px;width:156px;height:156px}
-.k{position:absolute;width:50px;height:50px;border:1px solid #64faffaa;border-radius:14px;background:#102431e8;color:#dff;font-size:20px;pointer-events:auto;box-shadow:0 0 8px #0ff2}
-.k.active{background:#16e7ff;color:#001014;border-color:#fff;box-shadow:0 0 25px #16e7ff;transform:scale(.94)}
-.up{left:53px;top:0}.left{left:0;top:53px}.right{right:0;top:53px}.down{left:53px;bottom:0}
-.arm{position:absolute;bottom:28px;width:82px;height:82px;border-radius:50%;border:1px solid #64faffaa;background:#102431e8;color:#dff;font-weight:700;pointer-events:auto}
+#joy{position:absolute;left:18px;bottom:22px;width:154px;height:154px;border-radius:50%;border:1px solid #55faff77;background:#07192399;box-shadow:inset 0 0 20px #00eaff22,0 0 12px #00eaff22;pointer-events:auto}
+#joy::after{content:"";position:absolute;inset:38px;border:1px solid #55faff33;border-radius:50%}
+#knob{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px;border-radius:50%;border:1px solid #8fffff;background:#103746dd;box-shadow:0 0 18px #00eaff55;pointer-events:none;transform:translate(0,0)}
+.arm{position:absolute;bottom:32px;width:82px;height:82px;border-radius:50%;border:1px solid #64faffaa;background:#102431e8;color:#dff;font-weight:700;pointer-events:auto}
 .arm.active{background:#ff2bd6;color:#fff;border-color:#fff;box-shadow:0 0 25px #ff2bd6;transform:scale(.94)}
 #l{right:116px}#r{right:20px}
 #msg{position:fixed;z-index:5;left:50%;bottom:125px;transform:translateX(-50%);padding:8px 13px;border:1px solid #54faff88;border-radius:10px;background:#06131de8;opacity:0;transition:.12s;pointer-events:none}
@@ -40,41 +39,33 @@ button{-webkit-tap-highlight-color:transparent;user-select:none;font:inherit}
 </div>
 
 <div id="hud"></div>
-<div id="hint">PC: WASD / ARROWS<br>Mobile: D-pad + L/R ARM</div>
+<div id="hint">360° JOYSTICK<br>L/R ARM = GRAPPLE</div>
 <div id="msg"></div>
 
 <div id="controls">
-  <div class="pad">
-    <button class="k up" data-key="up">▲</button>
-    <button class="k left" data-key="left">◀</button>
-    <button class="k right" data-key="right">▶</button>
-    <button class="k down" data-key="down">▼</button>
-  </div>
+  <div id="joy"><div id="knob"></div></div>
   <button class="arm" id="l">L ARM</button>
   <button class="arm" id="r">R ARM</button>
 </div>
 
 <script>
-const canvas=document.getElementById('game');
-const ctx=canvas.getContext('2d');
-const start=document.getElementById('start');
-const startBtn=document.getElementById('startBtn');
-const hud=document.getElementById('hud');
-const msg=document.getElementById('msg');
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const start=document.getElementById('start'),startBtn=document.getElementById('startBtn');
+const hud=document.getElementById('hud'),msg=document.getElementById('msg');
+const joy=document.getElementById('joy'),knob=document.getElementById('knob');
 
 let W=innerWidth,H=innerHeight,DPR=Math.min(devicePixelRatio||1,2);
-let running=false, credits=0, cargo=0, capacity=8;
-const keys=new Set();
-
-const player={x:0,y:0,speed:280};
+let running=false,credits=0,cargo=0,capacity=8;
+let joyVec={x:0,y:0},joyPointer=null;
+const player={x:0,y:0,vx:0,vy:0,angle:-Math.PI/2,maxSpeed:330,accel:520,drag:2.8,turnSmooth:12};
 const camera={x:0,y:0};
-let junk=[], stars=[];
+let junk=[],stars=[],grapples={left:null,right:null};
 let armFlash={left:0,right:0};
 
 function resize(){
-  W=innerWidth; H=innerHeight; DPR=Math.min(devicePixelRatio||1,2);
-  canvas.width=W*DPR; canvas.height=H*DPR;
-  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,2);
+  canvas.width=W*DPR;canvas.height=H*DPR;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
   ctx.setTransform(DPR,0,0,DPR,0,0);
   makeStars();
 }
@@ -82,12 +73,7 @@ addEventListener('resize',resize);
 
 function makeStars(){
   stars=[];
-  for(let i=0;i<180;i++){
-    stars.push({
-      x:Math.random()*W,y:Math.random()*H,
-      depth:.2+Math.random()*.8,r:.5+Math.random()*1.3
-    });
-  }
+  for(let i=0;i<180;i++) stars.push({x:Math.random()*W,y:Math.random()*H,depth:.2+Math.random()*.8,r:.5+Math.random()*1.3});
 }
 
 const types=[
@@ -101,261 +87,247 @@ const types=[
 
 function spawnJunk(){
   junk=[];
-  for(let i=0;i<45;i++){
-    const a=Math.random()*Math.PI*2;
-    const d=180+Math.random()*1800;
-    const t=types[Math.floor(Math.random()*types.length)];
+  for(let i=0;i<55;i++){
+    const a=Math.random()*Math.PI*2,d=180+Math.random()*2200,t=types[Math.floor(Math.random()*types.length)];
     junk.push({
-      x:Math.cos(a)*d,
-      y:Math.sin(a)*d,
-      ...t,
-      taken:false,
-      rot:Math.random()*Math.PI*2
+      x:Math.cos(a)*d,y:Math.sin(a)*d,...t,taken:false,rot:Math.random()*Math.PI*2,
+      driftX:(Math.random()-.5)*10,driftY:(Math.random()-.5)*10,
+      phase:Math.random()*Math.PI*2,spin:(Math.random()-.5)*.25
     });
   }
 }
 
 function begin(){
-  running=true;
-  start.style.display='none';
-  credits=0; cargo=0;
-  player.x=0; player.y=0;
-  // IMPORTANT: camera is exactly the mech position.
-  camera.x=player.x;
-  camera.y=player.y;
-  spawnJunk();
-  notice('SHIFT STARTED');
+  running=true;start.style.display='none';credits=0;cargo=0;
+  player.x=0;player.y=0;player.vx=0;player.vy=0;player.angle=-Math.PI/2;
+  camera.x=0;camera.y=0;grapples={left:null,right:null};spawnJunk();notice('SHIFT STARTED');
 }
-
 function notice(t){
-  msg.textContent=t; msg.style.opacity='1';
-  clearTimeout(notice.timer);
-  notice.timer=setTimeout(()=>msg.style.opacity='0',700);
+  msg.textContent=t;msg.style.opacity='1';
+  clearTimeout(notice.timer);notice.timer=setTimeout(()=>msg.style.opacity='0',800);
 }
 
-function bindHold(button,key){
-  const down=e=>{
-    e.preventDefault();
-    keys.add(key);
-    button.classList.add('active');
-  };
-  const up=e=>{
-    e.preventDefault();
-    keys.delete(key);
-    button.classList.remove('active');
-  };
-  button.addEventListener('pointerdown',down);
-  button.addEventListener('pointerup',up);
-  button.addEventListener('pointercancel',up);
-  button.addEventListener('pointerleave',up);
+function setJoystick(e){
+  const r=joy.getBoundingClientRect();
+  const cx=r.left+r.width/2,cy=r.top+r.height/2;
+  let dx=e.clientX-cx,dy=e.clientY-cy;
+  const max=r.width*.34, len=Math.hypot(dx,dy);
+  if(len>max){dx=dx/len*max;dy=dy/len*max}
+  joyVec.x=dx/max;joyVec.y=dy/max;
+  knob.style.transform=`translate(${dx}px,${dy}px)`;
 }
-document.querySelectorAll('.k').forEach(b=>bindHold(b,b.dataset.key));
+function resetJoystick(){
+  joyPointer=null;joyVec.x=0;joyVec.y=0;knob.style.transform='translate(0,0)';
+}
+joy.addEventListener('pointerdown',e=>{e.preventDefault();joyPointer=e.pointerId;joy.setPointerCapture(e.pointerId);setJoystick(e)});
+joy.addEventListener('pointermove',e=>{if(e.pointerId===joyPointer){e.preventDefault();setJoystick(e)}});
+joy.addEventListener('pointerup',resetJoystick);
+joy.addEventListener('pointercancel',resetJoystick);
 
-function grab(side,button){
+function angleDiff(a,b){return Math.atan2(Math.sin(b-a),Math.cos(b-a))}
+function rotateToward(current,target,amount){
+  return current+angleDiff(current,target)*Math.min(1,amount);
+}
+
+function startGrapple(side,button){
   if(!running)return;
   button.classList.add('active');
-  setTimeout(()=>button.classList.remove('active'),140);
+  setTimeout(()=>button.classList.remove('active'),180);
+  if(grapples[side])return;
   if(cargo>=capacity){notice('CARGO FULL');return;}
 
-  let target=null,best=170;
+  const sideSign=side==='left'?-1:1;
+  const forward={x:Math.cos(player.angle),y:Math.sin(player.angle)};
+  const right={x:-forward.y,y:forward.x};
+  const origin={
+    x:player.x+forward.x*18+right.x*sideSign*13,
+    y:player.y+forward.y*18+right.y*sideSign*13
+  };
+
+  let target=null,best=390;
   for(const j of junk){
     if(j.taken)continue;
-    const d=Math.hypot(j.x-player.x,j.y-player.y);
-    if(d<best){best=d;target=j;}
+    const d=Math.hypot(j.x-origin.x,j.y-origin.y);
+    if(d>best)continue;
+    const to=Math.atan2(j.y-origin.y,j.x-origin.x);
+    // Broad 110° forward cone, but not too restrictive.
+    if(Math.abs(angleDiff(player.angle,to))<Math.PI*.62){best=d;target=j}
   }
-  armFlash[side]=.18;
+  armFlash[side]=.22;
+  if(!target){notice('NO TARGET IN GRAPPLE ARC');return;}
 
-  if(!target){
-    notice('NO TARGET IN RANGE');
-    return;
-  }
-  target.taken=true;
-  cargo++;
-  credits+=target.value;
-  notice(target.name+'  +$'+target.value);
+  grapples[side]={
+    state:'out',t:0,origin,
+    target,hit:false
+  };
 }
 
-function bindArm(button,side){
-  button.addEventListener('pointerdown',e=>{
-    e.preventDefault();
-    grab(side,button);
-  });
+function finishGrapple(side){
+  const g=grapples[side]; if(!g)return;
+  const j=g.target;
+  if(!j.taken){
+    j.taken=true;
+    cargo++;
+    credits+=j.value;
+    notice(j.name+'  +$'+j.value);
+  }
+  grapples[side]=null;
 }
-bindArm(document.getElementById('l'),'left');
-bindArm(document.getElementById('r'),'right');
 
-startBtn.addEventListener('pointerdown',e=>{
-  e.preventDefault();
-  startBtn.classList.add('pressed');
-  begin();
-});
-startBtn.addEventListener('pointerup',()=>startBtn.classList.remove('pressed'));
+function updateGrapple(side,dt){
+  const g=grapples[side];if(!g)return;
+  g.t+=dt;
+  const speed=900;
+  const sideSign=side==='left'?-1:1;
+  const forward={x:Math.cos(player.angle),y:Math.sin(player.angle)};
+  const right={x:-forward.y,y:forward.x};
 
-addEventListener('keydown',e=>{
-  const k=e.key.toLowerCase();
-  keys.add(k);
-});
-addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+  if(g.state==='out'){
+    const d=Math.hypot(g.target.x-g.origin.x,g.target.y-g.origin.y);
+    if(g.t>=Math.min(.55,d/speed)){
+      g.hit=true;g.state='in';g.t=0;
+    }
+  }else{
+    // Reel time is based on distance, giving a visible "fishhook" return.
+    const d=Math.hypot(g.target.x-player.x,g.target.y-player.y);
+    if(g.t>=Math.min(.8,Math.max(.18,d/speed*.8))) finishGrapple(side);
+  }
+}
 
-// World movement ------------------------------------------------------------
-// The mech NEVER moves on screen.
-// Player coordinates move in the world.
-// Camera is hard-locked to player coordinates.
-// Therefore all junk/space scenery scrolls across the screen.
 function update(dt){
-  let dx=0,dy=0;
-  if(keys.has('d')||keys.has('arrowright')||keys.has('right'))dx+=1;
-  if(keys.has('a')||keys.has('arrowleft')||keys.has('left'))dx-=1;
-  if(keys.has('s')||keys.has('arrowdown')||keys.has('down'))dy+=1;
-  if(keys.has('w')||keys.has('arrowup')||keys.has('up'))dy-=1;
-
-  const len=Math.hypot(dx,dy);
-  if(len>0){
-    player.x+=(dx/len)*player.speed*dt;
-    player.y+=(dy/len)*player.speed*dt;
+  // 360-degree movement vector from joystick.
+  const ix=joyVec.x,iy=joyVec.y,len=Math.hypot(ix,iy);
+  if(len>.05){
+    const targetAngle=Math.atan2(iy,ix);
+    player.angle=rotateToward(player.angle,targetAngle,1-Math.exp(-player.turnSmooth*dt));
+    player.vx+=ix*player.accel*dt;
+    player.vy+=iy*player.accel*dt;
   }
 
-  // NO smoothing. Exact camera lock.
-  camera.x=player.x;
-  camera.y=player.y;
+  // Smooth acceleration and gradual stop.
+  const speed=Math.hypot(player.vx,player.vy);
+  if(speed>player.maxSpeed){
+    const k=player.maxSpeed/speed;player.vx*=k;player.vy*=k;
+  }
+  const brake=Math.exp(-player.drag*dt);
+  if(len<=.05){player.vx*=brake;player.vy*=brake}
 
-  armFlash.left=Math.max(0,armFlash.left-dt);
-  armFlash.right=Math.max(0,armFlash.right-dt);
+  player.x+=player.vx*dt;player.y+=player.vy*dt;
+
+  // Camera is hard-locked to the mech.
+  camera.x=player.x;camera.y=player.y;
+
+  for(const j of junk){
+    if(j.taken)continue;
+    j.phase+=dt;
+    j.x+=j.driftX*dt+Math.cos(j.phase*1.1)*2.2*dt;
+    j.y+=j.driftY*dt+Math.sin(j.phase*.9)*2.2*dt;
+    j.rot+=j.spin*dt;
+  }
+
+  updateGrapple('left',dt);updateGrapple('right',dt);
+  armFlash.left=Math.max(0,armFlash.left-dt);armFlash.right=Math.max(0,armFlash.right-dt);
 }
+
+function worldToScreen(x,y){return{x:W/2+(x-camera.x),y:H/2+(y-camera.y)}}
 
 function draw(){
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='#02040a';
-  ctx.fillRect(0,0,W,H);
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#02040a';ctx.fillRect(0,0,W,H);
 
-  // Star field moves opposite to player direction.
   for(const s of stars){
-    const sx=((s.x - camera.x*s.depth*.018)%W+W)%W;
-    const sy=((s.y - camera.y*s.depth*.018)%H+H)%H;
-    ctx.globalAlpha=.2+.65*s.depth;
-    ctx.fillStyle=s.depth>.72?'#c8ffff':'#52788a';
-    ctx.beginPath();
-    ctx.arc(sx,sy,s.r,0,Math.PI*2);
-    ctx.fill();
+    const sx=((s.x-camera.x*s.depth*.018)%W+W)%W;
+    const sy=((s.y-camera.y*s.depth*.018)%H+H)%H;
+    ctx.globalAlpha=.2+.65*s.depth;ctx.fillStyle=s.depth>.72?'#c8ffff':'#52788a';
+    ctx.beginPath();ctx.arc(sx,sy,s.r,0,Math.PI*2);ctx.fill();
   }
   ctx.globalAlpha=1;
 
-  // World grid, also scrolls with the camera.
-  const grid=120;
-  const ox=((W/2-camera.x)%grid+grid)%grid;
-  const oy=((H/2-camera.y)%grid+grid)%grid;
-  ctx.strokeStyle='#0a2532';
-  ctx.lineWidth=1;
-  for(let x=ox;x<W;x+=grid){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
-  for(let y=oy;y<H;y+=grid){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  const grid=120,ox=((W/2-camera.x)%grid+grid)%grid,oy=((H/2-camera.y)%grid+grid)%grid;
+  ctx.strokeStyle='#0a2532';ctx.lineWidth=1;
+  for(let x=ox;x<W;x+=grid){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+  for(let y=oy;y<H;y+=grid){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
 
-  // Junk uses world coordinates -> screen coordinates.
   for(const j of junk){
     if(j.taken)continue;
-    const sx=W/2+(j.x-camera.x);
-    const sy=H/2+(j.y-camera.y);
-    if(sx<-50||sx>W+50||sy<-50||sy>H+50)continue;
-
-    ctx.save();
-    ctx.translate(sx,sy);
-    ctx.rotate(j.rot);
-    ctx.fillStyle=j.color;
-    ctx.strokeStyle='#dffcff';
-    ctx.lineWidth=1;
-    ctx.shadowBlur=12;
-    ctx.shadowColor=j.color;
-
-    if(j.name==='CIGARETTE BUTT'){
-      ctx.fillRect(-j.r,-3,j.r*2,6);
-    }else if(j.name==='OLD ENGINE'){
+    const s=worldToScreen(j.x,j.y);
+    if(s.x<-50||s.x>W+50||s.y<-50||s.y>H+50)continue;
+    ctx.save();ctx.translate(s.x,s.y);ctx.rotate(j.rot);
+    ctx.fillStyle=j.color;ctx.strokeStyle='#dffcff';ctx.lineWidth=1;ctx.shadowBlur=12;ctx.shadowColor=j.color;
+    if(j.name==='CIGARETTE BUTT')ctx.fillRect(-j.r,-3,j.r*2,6);
+    else if(j.name==='OLD ENGINE'){
       ctx.beginPath();ctx.arc(0,0,j.r,0,Math.PI*2);ctx.fill();
-      ctx.shadowBlur=0;ctx.fillStyle='#26394b';
-      ctx.beginPath();ctx.arc(0,0,j.r*.42,0,Math.PI*2);ctx.fill();
-    }else{
-      ctx.beginPath();
-      ctx.rect(-j.r,-j.r*.7,j.r*2,j.r*1.4);
-      ctx.fill();ctx.stroke();
-    }
+      ctx.shadowBlur=0;ctx.fillStyle='#26394b';ctx.beginPath();ctx.arc(0,0,j.r*.42,0,Math.PI*2);ctx.fill();
+    }else{ctx.beginPath();ctx.rect(-j.r,-j.r*.7,j.r*2,j.r*1.4);ctx.fill();ctx.stroke()}
     ctx.restore();
   }
 
-  drawMech();
+  drawGrapple('left');drawGrapple('right');drawMech();
 }
 
 function drawMech(){
   const cx=W/2,cy=H/2;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(player.angle+Math.PI/2);
 
-  ctx.save();
-  ctx.translate(cx,cy);
+  // small engine trail shows acceleration
+  const speed=Math.hypot(player.vx,player.vy);
+  if(speed>15){
+    const a=Math.min(1,speed/player.maxSpeed);
+    ctx.globalAlpha=.25+.35*a;ctx.fillStyle='#28e9ff';ctx.shadowBlur=18;ctx.shadowColor='#28e9ff';
+    ctx.beginPath();ctx.moveTo(-7,29);ctx.lineTo(0,48+16*a);ctx.lineTo(7,29);ctx.fill();ctx.globalAlpha=1;
+  }
 
-  // Arms point forward. Later these become physical grappling arms.
-  drawArm(-1,armFlash.left);
-  drawArm(1,armFlash.right);
+  ctx.shadowBlur=20;ctx.shadowColor='#2df5ff';ctx.fillStyle='#172a3c';ctx.strokeStyle='#55faff';ctx.lineWidth=2;
+  ctx.beginPath();ctx.roundRect(-24,-32,48,64,11);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#9fffff';ctx.fillRect(-11,-18,22,10);
+  ctx.fillStyle='#263d52';ctx.fillRect(-16,2,32,17);
+  ctx.fillStyle='#55faff';ctx.fillRect(-5,23,10,7);
+  ctx.shadowBlur=0;ctx.restore();
+}
 
-  ctx.shadowBlur=20;
-  ctx.shadowColor='#2df5ff';
-  ctx.fillStyle='#172a3c';
-  ctx.strokeStyle='#55faff';
-  ctx.lineWidth=2;
+function drawGrapple(side){
+  const g=grapples[side];const sign=side==='left'?-1:1;
+  const forward={x:Math.cos(player.angle),y:Math.sin(player.angle)};
+  const right={x:-forward.y,y:forward.x};
+  const origin={x:player.x+forward.x*18+right.x*sign*13,y:player.y+forward.y*18+right.y*sign*13};
 
-  ctx.beginPath();
-  ctx.roundRect(-24,-32,48,64,11);
-  ctx.fill();ctx.stroke();
+  let end;
+  if(g){
+    if(g.state==='out'){
+      const t=Math.min(1,g.t/.55);
+      end={x:g.origin.x+(g.target.x-g.origin.x)*t,y:g.origin.y+(g.target.y-g.origin.y)*t};
+    }else{
+      const t=Math.min(1,g.t/.55);
+      end={x:g.target.x+(player.x-g.target.x)*t,y:g.target.y+(player.y-g.target.y)*t};
+    }
+  }else{
+    end={x:origin.x+forward.x*65,y:origin.y+forward.y*65};
+  }
 
-  ctx.fillStyle='#9fffff';
-  ctx.fillRect(-11,-18,22,10);
-  ctx.fillStyle='#263d52';
-  ctx.fillRect(-16,2,32,17);
-  ctx.fillStyle='#55faff';
-  ctx.fillRect(-5,23,10,7);
-
-  ctx.shadowBlur=0;
+  const a=worldToScreen(origin.x,origin.y),b=worldToScreen(end.x,end.y);
+  ctx.save();ctx.strokeStyle=g?'#ff2bd6':'#51f7ff';ctx.shadowBlur=g?18:8;ctx.shadowColor=ctx.strokeStyle;ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  ctx.fillStyle=g?'#ff2bd6':'#183a48';ctx.strokeStyle='#dffcff';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(b.x,b.y,9,0,Math.PI*2);ctx.fill();ctx.stroke();
   ctx.restore();
 }
 
-function drawArm(side,flash){
-  const color=flash>0?'#ff2bd6':'#51f7ff';
-  const sx=side*20,sy=side*7;
-  const tx=side*78,ty=-8;
-
-  ctx.strokeStyle=color;
-  ctx.shadowBlur=flash>0?22:10;
-  ctx.shadowColor=color;
-  ctx.lineWidth=7;
-
-  ctx.beginPath();
-  ctx.moveTo(sx,sy);
-  ctx.lineTo(side*48,-2);
-  ctx.lineTo(tx,ty);
-  ctx.stroke();
-
-  ctx.fillStyle=flash>0?'#ff2bd6':'#183a48';
-  ctx.strokeStyle='#dffcff';
-  ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.arc(tx,ty,9,0,Math.PI*2);
-  ctx.fill();ctx.stroke();
-  ctx.shadowBlur=0;
-}
+document.getElementById('l').addEventListener('pointerdown',e=>{e.preventDefault();startGrapple('left',e.currentTarget)});
+document.getElementById('r').addEventListener('pointerdown',e=>{e.preventDefault();startGrapple('right',e.currentTarget)});
+startBtn.addEventListener('pointerdown',e=>{e.preventDefault();startBtn.classList.add('pressed');begin()});
+startBtn.addEventListener('pointerup',()=>startBtn.classList.remove('pressed'));
 
 let last=0;
 function loop(t){
   if(!last)last=t;
-  const dt=Math.min(.033,(t-last)/1000);
-  last=t;
+  const dt=Math.min(.033,(t-last)/1000);last=t;
   if(running){
-    update(dt);
-    draw();
-    hud.innerHTML=
-      `CREDITS: $${credits} &nbsp; CARGO: ${cargo}/${capacity}<br>`+
-      `MECH POS: ${Math.round(player.x)}, ${Math.round(player.y)}<br>`+
-      `CAMERA: LOCKED TO MECH`;
+    update(dt);draw();
+    const sp=Math.round(Math.hypot(player.vx,player.vy));
+    hud.innerHTML=`CREDITS: $${credits} &nbsp; CARGO: ${cargo}/${capacity}<br>SPEED: ${sp}<br>JOYSTICK: 360°`;
   }
   requestAnimationFrame(loop);
 }
-
-resize();
-requestAnimationFrame(loop);
+resize();requestAnimationFrame(loop);
 </script>
 </body>
 </html>
