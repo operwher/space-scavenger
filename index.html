@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Space Scavenger Prototype 0.8</title>
+<title>Space Scavenger Prototype 1.0</title>
 <style>
   html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050713;color:#dff;touch-action:none;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
   canvas{display:block;width:100%;height:100%;background:#050713}
@@ -32,18 +32,18 @@
 <div id="hud">
   <b>SPACE SCAVENGER</b><br>
   CARGO <span id="cargo">0</span>/12 · ¢ <span id="credits">0</span><br>
-  SPEED <span id="speed">0.0</span> · MAX <span id="max">2.2</span>
+  SPEED <span id="speed">0.0</span> · MAX <span id="max">1.4</span>
 </div>
-<div id="hint">조이스틱으로 360° 이동 · 방향을 급하게 바꾸면 자동 감속</div>
+<div id="hint">조이스틱으로 360° 이동 · 기본 무기: 관절 집게</div>
 
 <div id="joy" class="ctrl"><div id="knob"></div></div>
-<button id="leftArm" class="ctrl arm">L ARM</button>
-<button id="rightArm" class="ctrl arm">R ARM</button>
+<button id="leftArm" class="ctrl arm" aria-label="왼팔 집게">L</button>
+<button id="rightArm" class="ctrl arm" aria-label="오른팔 집게">R</button>
 
 <div id="start">
   <div id="startBox">
     <h1>SPACE SCAVENGER</h1>
-    <p>ORBITAL CLEANUP SHIFT · PROTOTYPE 0.8</p>
+    <p>ORBITAL CLEANUP SHIFT · PROTOTYPE 1.0</p>
     <button id="startBtn">START SHIFT</button>
   </div>
 </div>
@@ -61,8 +61,8 @@ const leftBtn=document.getElementById('leftArm'),rightBtn=document.getElementByI
 let started=false, last=performance.now(), cargo=0, credits=0;
 const world={x:0,y:0};
 const mech={x:0,y:0,heading:0,vx:0,vy:0};
-const BASE_MAX=2.2; // intentionally low: upgrade room later
-const ACCEL=1.35, DRAG=.38, TURN_RATE=2.8;
+const BASE_MAX=1.4; // deliberately slow: speed upgrades can matter later
+const ACCEL=0.95, DRAG=.52, TURN_RATE=2.8;
 const junk=[];
 for(let i=0;i<42;i++){
   junk.push({x:(Math.random()-.5)*1700,y:(Math.random()-.5)*1100,
@@ -126,59 +126,93 @@ function updateMech(dt){
   mech.x+=mech.vx*60*dt; mech.y+=mech.vy*60*dt;
 }
 
-const grapples={
-  L:{cool:0,success:false,state:'ready',x:0,y:0,tx:0,ty:0,dist:0,target:null},
-  R:{cool:0,success:false,state:'ready',x:0,y:0,tx:0,ty:0,dist:0,target:null}
+const weapons={
+  L:{cool:0,success:false,state:'ready',x:0,y:0,target:null,progress:0},
+  R:{cool:0,success:false,state:'ready',x:0,y:0,target:null,progress:0}
 };
-const GRAPPLE_SPEED=520, RANGE=250;
-function armScreenButton(side){
-  return side==='L'?leftBtn:rightBtn;
-}
+const weaponMode='pincer'; // Basic weapon. Grapple can be added as another weapon type later.
+const PINCER_REACH=76;
+const PINCER_EXTEND_TIME=.22;
+const PINCER_RETRACT_TIME=.22;
+const PINCER_CLOSE_TIME=.16;
+
+function armScreenButton(side){ return side==='L'?leftBtn:rightBtn; }
 function updateArmUI(side){
-  const g=grapples[side],btn=armScreenButton(side);
+  const g=weapons[side],btn=armScreenButton(side);
   if(g.cool>0)btn.classList.add('cool'); else btn.classList.remove('cool');
 }
+function sideBasis(side){
+  // Both arms rotate with the mech. Each arm starts at its own shoulder and points forward with a slight spread.
+  const sideSign=side==='L'?-1:1;
+  const a=mech.heading + sideSign*.34;
+  const shoulderDist=13;
+  return {
+    sideSign,a,
+    sx:mech.x+Math.cos(mech.heading+sideSign*.62)*shoulderDist,
+    sy:mech.y+Math.sin(mech.heading+sideSign*.62)*shoulderDist
+  };
+}
+function pincerReachPoint(side){
+  const b=sideBasis(side);
+  return {x:b.sx+Math.cos(b.a)*PINCER_REACH,y:b.sy+Math.sin(b.a)*PINCER_REACH};
+}
 function pressArm(side){
-  const g=grapples[side];
-  if(!started || g.cool>0 || g.state==='out'||g.state==='return')return;
+  const g=weapons[side];
+  if(!started || g.cool>0 || g.state!=='ready')return;
   const btn=armScreenButton(side);
   btn.classList.add('active'); setTimeout(()=>btn.classList.remove('active'),140);
-  g.state='out';g.target=null;
-  const sx=mech.x,sy=mech.y;
-  // Grapple fires exactly in the mech's facing direction. No auto-targeting.
-  g.x=sx;g.y=sy;g.tx=sx+Math.cos(mech.heading)*RANGE;g.ty=sy+Math.sin(mech.heading)*RANGE;
-  g.dist=0;
+  if(weaponMode!=='pincer')return;
+  g.state='extend';g.target=null;g.progress=0;
+  const tip=pincerReachPoint(side); g.x=tip.x;g.y=tip.y;
 }
 function finishArm(side,success){
-  const g=grapples[side];
-  g.success=success; g.state='ready'; g.target=null;
-  g.cool=success?2.0:5.0;
+  const g=weapons[side];
+  g.success=success; g.state='ready'; g.target=null; g.progress=0;
+  g.cool=success?1.6:3.2;
 }
-function updateGrapple(side,dt){
-  const g=grapples[side];
-  if(g.cool>0){g.cool=Math.max(0,g.cool-dt);if(g.cool===0)g.state='ready'}
+function closestPointOnSegment(px,py,ax,ay,bx,by){
+  const vx=bx-ax,vy=by-ay,den=vx*vx+vy*vy||1;
+  let t=((px-ax)*vx+(py-ay)*vy)/den; t=Math.max(0,Math.min(1,t));
+  return {x:ax+vx*t,y:ay+vy*t,t};
+}
+function findPincerTarget(side){
+  const b=sideBasis(side),tip=pincerReachPoint(side);
+  let best=null,bestD=Infinity;
+  for(const j of junk){
+    const currentTip=(weapons[side].state==='extend')?{x:weapons[side].x,y:weapons[side].y}:tip;
+    const q=closestPointOnSegment(j.x,j.y,b.sx,b.sy,currentTip.x,currentTip.y);
+    const d=Math.hypot(j.x-q.x,j.y-q.y);
+    if(d<j.r+8 && q.t<1 && d<bestD){best=j;bestD=d}
+  }
+  return best;
+}
+function updateWeapon(side,dt){
+  const g=weapons[side];
+  if(g.cool>0){g.cool=Math.max(0,g.cool-dt);if(g.cool===0)g.state='ready';}
   if(g.state==='ready')return;
-  const dx=g.tx-g.x,dy=g.ty-g.y,d=Math.hypot(dx,dy),step=GRAPPLE_SPEED*dt;
-  if(g.state==='out'){
-    const nx=d?dx/d:0,ny=d?dy/d:0;
-    const nx2=g.x+nx*Math.min(step,d),ny2=g.y+ny*Math.min(step,d);
-    const vx=nx2-g.x,vy=ny2-g.y,vv=vx*vx+vy*vy||1;
-    let hit=null,hitT=Infinity;
-    for(const j of junk){
-      let t=((j.x-g.x)*vx+(j.y-g.y)*vy)/vv;
-      t=Math.max(0,Math.min(1,t));
-      const px=g.x+vx*t,py=g.y+vy*t;
-      if(Math.hypot(j.x-px,j.y-py)<=j.r+10 && t<hitT){hit=j;hitT=t}
-    }
+  const b=sideBasis(side),tip=pincerReachPoint(side);
+  if(g.state==='extend'){
+    g.progress=Math.min(1,g.progress+dt/PINCER_EXTEND_TIME);
+    g.x=b.sx+(tip.x-b.sx)*g.progress; g.y=b.sy+(tip.y-b.sy)*g.progress;
+    const hit=findPincerTarget(side);
     if(hit){
-      g.x=g.x+vx*hitT;g.y=g.y+vy*hitT;g.target=hit;g.state='return';g.tx=mech.x;g.ty=mech.y;
-    }else if(d>step){g.x=nx2;g.y=ny2}
-    else{g.x=g.tx;g.y=g.ty;g.state='return';g.tx=mech.x;g.ty=mech.y}
-  }else if(g.state==='return'){
-    g.tx=mech.x;g.ty=mech.y;
-    const dx2=g.tx-g.x,dy2=g.ty-g.y,d2=Math.hypot(dx2,dy2);
-    if(d2>step){g.x+=dx2/d2*step;g.y+=dy2/d2*step;if(g.target){g.target.x=g.x;g.target.y=g.y}}
-    else{
+      g.target=hit; g.state='close'; g.progress=0;
+    }else if(g.progress>=1){
+      g.state='retract'; g.progress=1;
+    }
+  }else if(g.state==='close'){
+    g.progress=Math.min(1,g.progress+dt/PINCER_CLOSE_TIME);
+    const tx=g.target?g.target.x:g.x,ty=g.target?g.target.y:g.y;
+    g.x=tx;g.y=ty;
+    if(g.target){
+      g.target.x=g.x;g.target.y=g.y;
+    }
+    if(g.progress>=1){g.state='retract';g.progress=1;}
+  }else if(g.state==='retract'){
+    g.progress=Math.max(0,g.progress-dt/PINCER_RETRACT_TIME);
+    g.x=b.sx+(tip.x-b.sx)*g.progress; g.y=b.sy+(tip.y-b.sy)*g.progress;
+    if(g.target){g.target.x=g.x;g.target.y=g.y;}
+    if(g.progress<=0){
       if(g.target){
         const captured=g.target,idx=junk.indexOf(captured);if(idx>=0)junk.splice(idx,1);
         cargo=Math.min(12,cargo+1);credits+=captured.value||10;finishArm(side,true);
@@ -186,6 +220,7 @@ function updateGrapple(side,dt){
     }
   }
 }
+
 function spawnMore(){
   while(junk.length<42){
     junk.push({x:mech.x+(Math.random()-.5)*1600,y:mech.y+(Math.random()-.5)*1100,
@@ -230,31 +265,66 @@ function drawJunk(){
     ctx.restore();
   }
 }
-function drawGrapple(side){
-  const g=grapples[side],ready=g.state==='ready';
-  const cx=W/2,cy=H/2,radius=36;
-  const arcCenter=mech.heading+(side==='L'?Math.PI*.72:Math.PI*.28),arcSpan=Math.PI*.58;
-  const total=g.cool>0?(g.success?2:5):0;
-  const progress=g.cool>0?1-Math.min(1,g.cool/total):1;
-  ctx.save();ctx.lineCap='round';ctx.lineWidth=3;
-  ctx.strokeStyle='rgba(255,120,215,.15)';
-  ctx.beginPath();ctx.arc(cx,cy,radius,arcCenter-arcSpan/2,arcCenter+arcSpan/2);ctx.stroke();
-  ctx.strokeStyle=side==='L'?'#ff68ce':'#d79aff';
-  ctx.beginPath();ctx.arc(cx,cy,radius,arcCenter-arcSpan/2,arcCenter-arcSpan/2+arcSpan*progress);ctx.stroke();ctx.restore();
-  if(ready)return;
-  const sideSign=side==='L'?-1:1,baseAngle=mech.heading+sideSign*.55;
-  const bx=mech.x+Math.cos(baseAngle)*17,by=mech.y+Math.sin(baseAngle)*17;
-  const x1=sx(bx),y1=sy(by),x2=sx(g.x),y2=sy(g.y),a=Math.atan2(y2-y1,x2-x1);
-  ctx.save();ctx.strokeStyle=side==='L'?'#ff79d8':'#d7a0ff';ctx.lineWidth=3;ctx.shadowBlur=10;ctx.shadowColor=ctx.strokeStyle;
-  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
-  ctx.translate(x2,y2);ctx.rotate(a);ctx.strokeStyle='#f4ffff';ctx.lineWidth=2.5;
-  ctx.beginPath();ctx.moveTo(-2,-2);ctx.lineTo(9,-7);ctx.lineTo(14,-4);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(-2,2);ctx.lineTo(9,7);ctx.lineTo(14,4);ctx.stroke();
-  ctx.fillStyle=side==='L'?'#ff79d8':'#d7a0ff';ctx.beginPath();ctx.arc(0,0,4,0,Math.PI*2);ctx.fill();ctx.restore();
+function drawCooldownArc(side,floatY){
+  const g=weapons[side];
+  if(g.cool<=0)return; // invisible when ready
+  const sideSign=side==='L'?-1:1;
+  const cx=W/2,cy=H/2+floatY;
+  const arcCenter=mech.heading + sideSign*Math.PI*.92;
+  const arcSpan=.78;
+  const radius=30;
+  const total=g.success?1.6:3.2;
+  const progress=1-Math.min(1,g.cool/total);
+  ctx.save();
+  ctx.translate(cx,cy);ctx.rotate(0);
+  ctx.lineCap='round';ctx.lineWidth=2.2;
+  ctx.strokeStyle=side==='L'?'rgba(255,105,208,.18)':'rgba(190,145,255,.18)';
+  ctx.beginPath();ctx.arc(0,0,radius,arcCenter-arcSpan/2,arcCenter+arcSpan/2);ctx.stroke();
+  ctx.strokeStyle=side==='L'?'rgba(255,105,208,.9)':'rgba(190,145,255,.9)';
+  ctx.beginPath();ctx.arc(0,0,radius,arcCenter-arcSpan/2,arcCenter-arcSpan/2+arcSpan*progress);ctx.stroke();
+  ctx.restore();
+}
+function drawPincerArm(side,floatY){
+  const g=weapons[side], b=sideBasis(side), tip=pincerReachPoint(side);
+  const sideSign=b.sideSign;
+  const moving=g.state!=='ready';
+  // Slightly animate the resting elbow, but the entire arm axis follows mech.heading.
+  const restReach=g.state==='ready'?0:Math.min(1,g.progress);
+  const elbowDist=31 + 9*restReach;
+  const shoulderAngle=mech.heading + sideSign*.62;
+  const foreAngle=mech.heading + sideSign*.34;
+  const shoulder={x:mech.x+Math.cos(shoulderAngle)*13,y:mech.y+Math.sin(shoulderAngle)*13};
+  const elbow={x:shoulder.x+Math.cos(foreAngle)*elbowDist,y:shoulder.y+Math.sin(foreAngle)*elbowDist};
+  const actualTip=moving?{x:g.x,y:g.y}:tip;
+  const clawAngle=foreAngle;
+  const sx1=sx(shoulder.x),sy1=sy(shoulder.y)+floatY;
+  const ex=sx(elbow.x),ey=sy(elbow.y)+floatY;
+  const tx=sx(actualTip.x),ty=sy(actualTip.y)+floatY;
+  const c=side==='L'?'#ff72d2':'#caa0ff';
+  ctx.save();ctx.lineCap='round';ctx.lineJoin='round';ctx.shadowBlur=10;ctx.shadowColor=c;
+  // upper arm
+  ctx.strokeStyle=c;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(sx1,sy1);ctx.lineTo(ex,ey);ctx.stroke();
+  // elbow joint
+  ctx.fillStyle='#172a37';ctx.strokeStyle='#f2ffff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(ex,ey,5,0,Math.PI*2);ctx.fill();ctx.stroke();
+  // forearm
+  ctx.strokeStyle=c;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(ex,ey);ctx.lineTo(tx,ty);ctx.stroke();
+  // pincer wrist
+  ctx.fillStyle=c;ctx.beginPath();ctx.arc(tx,ty,4,0,Math.PI*2);ctx.fill();
+  // two articulated jaws. Closed on target, open otherwise.
+  const close=(g.state==='close')?1:0;
+  const open=.42*(1-close);
+  ctx.translate(tx,ty);ctx.rotate(clawAngle);
+  ctx.strokeStyle='#f3ffff';ctx.lineWidth=2.4;ctx.shadowBlur=8;ctx.shadowColor=c;
+  ctx.beginPath();ctx.moveTo(1,0);ctx.lineTo(12, -7-open*5);ctx.lineTo(18, -4-open*6);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(1,0);ctx.lineTo(12, 7+open*5);ctx.lineTo(18, 4+open*6);ctx.stroke();
+  // claw tips
+  ctx.lineWidth=1.8;ctx.beginPath();ctx.moveTo(18,-4-open*6);ctx.lineTo(15,-1-open*5);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(18,4+open*6);ctx.lineTo(15,1+open*5);ctx.stroke();
+  ctx.restore();
 }
 function drawMech(){
-  const idle=Math.hypot(mech.vx,mech.vy)<0.12;
-  const floatY=idle?Math.sin(performance.now()*0.0024)*3:Math.sin(performance.now()*0.0018)*0.7;
+  const idle=Math.hypot(mech.vx,mech.vy)<0.08;
+  const floatY=idle?Math.sin(performance.now()*0.0024)*3.5:Math.sin(performance.now()*0.0018)*0.7;
   const floatRot=idle?Math.sin(performance.now()*0.0017)*0.018:0;
   const cx=W/2,cy=H/2+floatY;
   ctx.save();ctx.translate(cx,cy);ctx.rotate(mech.heading+floatRot);
@@ -263,17 +333,13 @@ function drawMech(){
   ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-10,-15);ctx.lineTo(-18,-9);ctx.lineTo(-16,9);ctx.lineTo(-10,15);ctx.closePath();ctx.fill();ctx.stroke();
   ctx.fillStyle='#dffcff';ctx.fillRect(-5,-7,12,14);
   ctx.fillStyle='#ff5ec7';ctx.fillRect(5,-4,4,8);
-  for(const side of [-1,1]){
-    const c=side<0?'#ff79d8':'#d7a0ff';
-    ctx.strokeStyle=c;ctx.lineWidth=4;ctx.shadowBlur=8;ctx.shadowColor=c;
-    ctx.beginPath();ctx.moveTo(0,side*11);ctx.lineTo(9,side*18);ctx.stroke();
-    ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(9,side*18);ctx.lineTo(16,side*22);ctx.stroke();
-    ctx.beginPath();ctx.arc(16,side*22,3,0,Math.PI*2);ctx.stroke();
-  }
   ctx.restore();
+  // Arms and cooldown arcs are drawn in screen space around the same floating center.
+  drawPincerArm('L',floatY);drawPincerArm('R',floatY);
+  drawCooldownArc('L',floatY);drawCooldownArc('R',floatY);
 }
 function draw(){
-  drawBackground();drawJunk();drawGrapple('L');drawGrapple('R');drawMech();
+  drawBackground();drawJunk();drawMech();
   speedEl.textContent=Math.hypot(mech.vx,mech.vy).toFixed(1);maxEl.textContent=BASE_MAX.toFixed(1);
   cargoEl.textContent=cargo;creditsEl.textContent=credits;
   updateArmUI('L');updateArmUI('R');
@@ -281,7 +347,7 @@ function draw(){
 function loop(t){
   const dt=Math.min(.033,(t-last)/1000);last=t;
   if(started){
-    updateMech(dt);updateGrapple('L',dt);updateGrapple('R',dt);updateJunk(dt,t);spawnMore();draw();
+    updateMech(dt);updateWeapon('L',dt);updateWeapon('R',dt);updateJunk(dt,t);spawnMore();draw();
   }
   requestAnimationFrame(loop);
 }
