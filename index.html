@@ -35,10 +35,6 @@
   SPEED <span id="speed">0.0</span> · MAX <span id="max">2.2</span>
 </div>
 <div id="hint">조이스틱으로 360° 이동 · 방향을 급하게 바꾸면 자동 감속</div>
-<div id="status">
-  L <span id="lcd">READY</span><br>
-  R <span id="rcd">READY</span>
-</div>
 
 <div id="joy" class="ctrl"><div id="knob"></div></div>
 <button id="leftArm" class="ctrl arm">L ARM</button>
@@ -60,7 +56,6 @@ addEventListener('resize',resize);resize();
 
 const cargoEl=document.getElementById('cargo'), creditsEl=document.getElementById('credits');
 const speedEl=document.getElementById('speed'), maxEl=document.getElementById('max');
-const lcd=document.getElementById('lcd'),rcd=document.getElementById('rcd');
 const leftBtn=document.getElementById('leftArm'),rightBtn=document.getElementById('rightArm');
 
 let started=false, last=performance.now(), cargo=0, credits=0;
@@ -135,14 +130,13 @@ const grapples={
   L:{cool:0,success:false,state:'ready',x:0,y:0,tx:0,ty:0,dist:0,target:null},
   R:{cool:0,success:false,state:'ready',x:0,y:0,tx:0,ty:0,dist:0,target:null}
 };
-const GRAPPLE_SPEED=520, RANGE=420;
+const GRAPPLE_SPEED=520, RANGE=250;
 function armScreenButton(side){
   return side==='L'?leftBtn:rightBtn;
 }
 function updateArmUI(side){
-  const g=grapples[side],btn=armScreenButton(side),el=side==='L'?lcd:rcd;
-  if(g.cool>0){btn.classList.add('cool');el.textContent=g.cool.toFixed(1)+'s'}
-  else {btn.classList.remove('cool');el.textContent=g.state==='ready'?'READY':g.state.toUpperCase()}
+  const g=grapples[side],btn=armScreenButton(side);
+  if(g.cool>0)btn.classList.add('cool'); else btn.classList.remove('cool');
 }
 function pressArm(side){
   const g=grapples[side];
@@ -166,33 +160,29 @@ function updateGrapple(side,dt){
   if(g.state==='ready')return;
   const dx=g.tx-g.x,dy=g.ty-g.y,d=Math.hypot(dx,dy),step=GRAPPLE_SPEED*dt;
   if(g.state==='out'){
-    if(d>step){g.x+=dx/d*step;g.y+=dy/d*step}
-    else {
-      g.x=g.tx;g.y=g.ty;
-      // Collision is checked only at the grapple head; anything along the line can be hooked.
-      let hit=null,best=34;
-      for(const j of junk){
-        const dd=Math.hypot(j.x-g.x,j.y-g.y);
-        if(dd<best){best=dd;hit=j}
-      }
-      if(hit){
-        g.target=hit; g.state='return'; g.tx=mech.x;g.ty=mech.y;
-      } else {
-        g.state='return';g.tx=mech.x;g.ty=mech.y;
-        g.failPending=true;
-      }
+    const nx=d?dx/d:0,ny=d?dy/d:0;
+    const nx2=g.x+nx*Math.min(step,d),ny2=g.y+ny*Math.min(step,d);
+    const vx=nx2-g.x,vy=ny2-g.y,vv=vx*vx+vy*vy||1;
+    let hit=null,hitT=Infinity;
+    for(const j of junk){
+      let t=((j.x-g.x)*vx+(j.y-g.y)*vy)/vv;
+      t=Math.max(0,Math.min(1,t));
+      const px=g.x+vx*t,py=g.y+vy*t;
+      if(Math.hypot(j.x-px,j.y-py)<=j.r+10 && t<hitT){hit=j;hitT=t}
     }
-  } else if(g.state==='return'){
+    if(hit){
+      g.x=g.x+vx*hitT;g.y=g.y+vy*hitT;g.target=hit;g.state='return';g.tx=mech.x;g.ty=mech.y;
+    }else if(d>step){g.x=nx2;g.y=ny2}
+    else{g.x=g.tx;g.y=g.ty;g.state='return';g.tx=mech.x;g.ty=mech.y}
+  }else if(g.state==='return'){
     g.tx=mech.x;g.ty=mech.y;
     const dx2=g.tx-g.x,dy2=g.ty-g.y,d2=Math.hypot(dx2,dy2);
-    if(d2>step){g.x+=dx2/d2*step;g.y+=dy2/d2*step;
-      if(g.target){g.target.x=g.x;g.target.y=g.y}
-    } else {
+    if(d2>step){g.x+=dx2/d2*step;g.y+=dy2/d2*step;if(g.target){g.target.x=g.x;g.target.y=g.y}}
+    else{
       if(g.target){
-        const idx=junk.indexOf(g.target); if(idx>=0)junk.splice(idx,1);
-        cargo=Math.min(12,cargo+1);credits+=g.target?.value||10;
-        finishArm(side,true);
-      } else finishArm(side,false);
+        const captured=g.target,idx=junk.indexOf(captured);if(idx>=0)junk.splice(idx,1);
+        cargo=Math.min(12,cargo+1);credits+=captured.value||10;finishArm(side,true);
+      }else finishArm(side,false);
     }
   }
 }
@@ -241,21 +231,45 @@ function drawJunk(){
   }
 }
 function drawGrapple(side){
-  const g=grapples[side]; if(g.state==='ready')return;
-  const x1=sx(mech.x),y1=sy(mech.y),x2=sx(g.x),y2=sy(g.y);
-  ctx.save();ctx.strokeStyle=side==='L'?'#ff79d8':'#d7a0ff';ctx.lineWidth=3;ctx.shadowBlur=12;ctx.shadowColor=ctx.strokeStyle;
+  const g=grapples[side],ready=g.state==='ready';
+  const cx=W/2,cy=H/2,radius=36;
+  const arcCenter=mech.heading+(side==='L'?Math.PI*.72:Math.PI*.28),arcSpan=Math.PI*.58;
+  const total=g.cool>0?(g.success?2:5):0;
+  const progress=g.cool>0?1-Math.min(1,g.cool/total):1;
+  ctx.save();ctx.lineCap='round';ctx.lineWidth=3;
+  ctx.strokeStyle='rgba(255,120,215,.15)';
+  ctx.beginPath();ctx.arc(cx,cy,radius,arcCenter-arcSpan/2,arcCenter+arcSpan/2);ctx.stroke();
+  ctx.strokeStyle=side==='L'?'#ff68ce':'#d79aff';
+  ctx.beginPath();ctx.arc(cx,cy,radius,arcCenter-arcSpan/2,arcCenter-arcSpan/2+arcSpan*progress);ctx.stroke();ctx.restore();
+  if(ready)return;
+  const sideSign=side==='L'?-1:1,baseAngle=mech.heading+sideSign*.55;
+  const bx=mech.x+Math.cos(baseAngle)*17,by=mech.y+Math.sin(baseAngle)*17;
+  const x1=sx(bx),y1=sy(by),x2=sx(g.x),y2=sy(g.y),a=Math.atan2(y2-y1,x2-x1);
+  ctx.save();ctx.strokeStyle=side==='L'?'#ff79d8':'#d7a0ff';ctx.lineWidth=3;ctx.shadowBlur=10;ctx.shadowColor=ctx.strokeStyle;
   ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
-  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x2,y2,6,0,Math.PI*2);ctx.fill();
-  ctx.restore();
+  ctx.translate(x2,y2);ctx.rotate(a);ctx.strokeStyle='#f4ffff';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(-2,-2);ctx.lineTo(9,-7);ctx.lineTo(14,-4);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(-2,2);ctx.lineTo(9,7);ctx.lineTo(14,4);ctx.stroke();
+  ctx.fillStyle=side==='L'?'#ff79d8':'#d7a0ff';ctx.beginPath();ctx.arc(0,0,4,0,Math.PI*2);ctx.fill();ctx.restore();
 }
 function drawMech(){
-  const cx=W/2,cy=H/2;
-  ctx.save();ctx.translate(cx,cy);ctx.rotate(mech.heading);
+  const idle=Math.hypot(mech.vx,mech.vy)<0.12;
+  const floatY=idle?Math.sin(performance.now()*0.0024)*3:Math.sin(performance.now()*0.0018)*0.7;
+  const floatRot=idle?Math.sin(performance.now()*0.0017)*0.018:0;
+  const cx=W/2,cy=H/2+floatY;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(mech.heading+floatRot);
   ctx.shadowBlur=28;ctx.shadowColor='rgba(100,240,255,.35)';
   ctx.fillStyle='#182a39';ctx.strokeStyle='#9dfcff';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-10,-15);ctx.lineTo(-18,-9);ctx.lineTo(-16,9);ctx.lineTo(-10,15);ctx.closePath();ctx.fill();ctx.stroke();
   ctx.fillStyle='#dffcff';ctx.fillRect(-5,-7,12,14);
   ctx.fillStyle='#ff5ec7';ctx.fillRect(5,-4,4,8);
+  for(const side of [-1,1]){
+    const c=side<0?'#ff79d8':'#d7a0ff';
+    ctx.strokeStyle=c;ctx.lineWidth=4;ctx.shadowBlur=8;ctx.shadowColor=c;
+    ctx.beginPath();ctx.moveTo(0,side*11);ctx.lineTo(9,side*18);ctx.stroke();
+    ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(9,side*18);ctx.lineTo(16,side*22);ctx.stroke();
+    ctx.beginPath();ctx.arc(16,side*22,3,0,Math.PI*2);ctx.stroke();
+  }
   ctx.restore();
 }
 function draw(){
